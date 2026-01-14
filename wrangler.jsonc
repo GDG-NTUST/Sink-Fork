@@ -11,7 +11,7 @@
     "nodejs_compat"
   ],
   "vars": {
-    "NUXT_HOME_URL": "https://gdg.community.dev/gdg-on-campus-national-taiwan-university-of-science-and-technology-taipei-taiwan/",
+    "NUXT_HOME_URL": "https://linktr.ee/gdg.ntust",
     "NUXT_REDIRECT_STATUS_CODE": 307
   },
   "keep_vars": true,
