@@ -13,7 +13,10 @@
   ],
   "vars": {
     "NUXT_HOME_URL": "https://linktr.ee/gdg.ntust",
-    "NUXT_REDIRECT_STATUS_CODE": 307
+    "NUXT_REDIRECT_STATUS_CODE": 307,
+    // No R2 bucket is bound, so the daily cron would throw on every run.
+    // Flip to false once DEPLOY_R2_BUCKET_NAME is set.
+    "NUXT_DISABLE_AUTO_BACKUP": true
   },
   "keep_vars": true,
   "upload_source_maps": true,
