@@ -11,6 +11,14 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  // Both zones live in the same account as this Worker, so Wrangler manages
+  // their DNS records and certificates on every deploy. Declaring routes turns
+  // workers.dev off by default, so keep it on explicitly as a fallback URL.
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "gdg-ntust.org", "custom_domain": true },
+    { "pattern": "ntust-gdg.org", "custom_domain": true }
+  ],
   "vars": {
     "NUXT_HOME_URL": "https://linktr.ee/gdg.ntust",
     "NUXT_REDIRECT_STATUS_CODE": 307,
