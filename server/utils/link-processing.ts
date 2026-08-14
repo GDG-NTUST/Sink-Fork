@@ -15,6 +15,9 @@ const editableOptionalLinkFields = [
   'geo',
   'tags',
 ] as const satisfies readonly (keyof Link)[]
+// folderId is deliberately absent: unlike the fields above it preserves on
+// omission, so a client that never sends it cannot silently un-file a link.
+// Send `null` to clear it.
 
 interface LinkResponse {
   link: Link
@@ -23,7 +26,17 @@ interface LinkResponse {
 
 export async function prepareIncomingLink(event: H3Event, link: Link): Promise<void> {
   link.slug = normalizeSlug(event, link.slug)
+  await assertLinkFolderExists(event, link)
   await detectUnsafeLink(event, link)
+}
+
+/**
+ * Checked up front so an unknown folder returns 404 instead of surfacing as a
+ * raw foreign key failure from D1.
+ */
+export async function assertLinkFolderExists(event: H3Event, link: Pick<Link, 'folderId'>): Promise<void> {
+  if (link.folderId && !await folderExists(event, link.folderId))
+    throw createError({ status: 404, statusText: 'Folder not found' })
 }
 
 export async function detectUnsafeLink(event: H3Event, link: Pick<Link, 'url' | 'unsafe'>): Promise<void> {

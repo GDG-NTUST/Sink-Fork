@@ -1,6 +1,8 @@
+import type { PortableFolder } from './folder'
 import { customAlphabet } from 'nanoid'
 import { z } from 'zod'
 import { LINK_PASSWORD_MASK_PREFIX } from '../utils/link-password'
+import { FolderIdSchema } from './folder'
 
 const { slugRegex } = useAppConfig()
 
@@ -58,6 +60,8 @@ const LinkFieldsSchema = z.object({
   unsafe: z.boolean().optional(),
   geo: GeoSchema.optional(),
   tags: TagsSchema,
+  // null clears the folder, undefined means the field was not supplied.
+  folderId: FolderIdSchema.nullish(),
 })
 
 export const CreateLinkSchema = LinkFieldsSchema.extend({
@@ -109,6 +113,8 @@ export interface ExportData {
   exportedAt: string
   count: number
   links: Link[]
+  /** Present on the first page only; folders are not paginated. */
+  folders?: PortableFolder[]
   cursor?: string
   list_complete: boolean
 }

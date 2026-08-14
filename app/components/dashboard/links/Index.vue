@@ -3,6 +3,7 @@ import type { LinkUpdateType } from '@/types'
 import type { DashboardLink, DashboardLinkListResponse } from '@/types/dashboard-links'
 import { AlertCircle, Inbox, LoaderCircle } from '@lucide/vue'
 import { useInfiniteScroll } from '@vueuse/core'
+import { UNCATEGORIZED_FOLDER } from '#shared/schemas/folder'
 
 const linksStore = useDashboardLinksStore()
 
@@ -10,7 +11,7 @@ const links = ref<DashboardLink[]>([])
 const listComplete = ref(false)
 const listError = ref(false)
 const listLoading = ref(false)
-const limit = 24
+const limit = 48
 let cursor = ''
 let requestGeneration = 0
 
@@ -23,7 +24,9 @@ const scrollContainer = shallowRef<HTMLElement | null>(null)
 
 onMounted(() => {
   scrollContainer.value = document.getElementById('dashboard-main')
-  void getLinks()
+  // resetAndLoad, not getLinks: this is the path that paints from the cache, so
+  // a first render and a back-navigation get the same instant list.
+  resetAndLoad()
 })
 
 async function getLinks() {
@@ -41,6 +44,7 @@ async function getLinks() {
         sort: linksStore.sortBy,
         status: linksStore.status,
         tag: linksStore.tag,
+        folder: linksStore.folder,
       },
     })
 
@@ -48,8 +52,16 @@ async function getLinks() {
       return
 
     const newLinks = data.links.filter(Boolean)
-    const existingSlugs = new Set(links.value.map(link => link.slug))
-    links.value = links.value.concat(newLinks.filter(link => !existingSlugs.has(link.slug)))
+    if (!requestCursor) {
+      // The first page replaces whatever the cache painted, so links deleted or
+      // moved elsewhere since it was written do not linger.
+      links.value = newLinks
+      writeDashboardCache(cacheKey(), newLinks)
+    }
+    else {
+      const existingSlugs = new Set(links.value.map(link => link.slug))
+      links.value = links.value.concat(newLinks.filter(link => !existingSlugs.has(link.slug)))
+    }
     cursor = data.cursor
     listComplete.value = data.list_complete
     listError.value = false
@@ -69,14 +81,26 @@ async function getLinks() {
   }
 }
 
+/** One cache entry per filter combination, since each yields a different page. */
+function cacheKey() {
+  return `links:${linksStore.sortBy}:${linksStore.status}:${linksStore.tag ?? ''}:${linksStore.folder ?? ''}`
+}
+
 function resetAndLoad() {
   requestGeneration++
-  links.value = []
   resetCounters()
   cursor = ''
   listComplete.value = false
   listError.value = false
   listLoading.value = false
+
+  // Paint the last page seen for these filters right away, then revalidate.
+  // The cursor stays empty so getLinks() refetches page one and replaces it.
+  const cached = readDashboardCache<DashboardLink[]>(cacheKey())
+  links.value = cached ?? []
+  if (cached?.length)
+    void fetchCounters(cached.map(link => link.id))
+
   void getLinks()
 }
 
@@ -93,14 +117,23 @@ useInfiniteScroll(
 )
 
 watch(
-  [() => linksStore.sortBy, () => linksStore.status, () => linksStore.tag],
+  [() => linksStore.sortBy, () => linksStore.status, () => linksStore.tag, () => linksStore.folder],
   resetAndLoad,
 )
+
+function matchesFolderFilter(link: DashboardLink) {
+  if (!linksStore.folder)
+    return true
+  if (linksStore.folder === UNCATEGORIZED_FOLDER)
+    return !link.folderId
+  return link.folderId === linksStore.folder
+}
 
 function matchesCurrentFilters(link: DashboardLink) {
   const isExpired = Boolean(link.expiration && link.expiration <= Math.floor(Date.now() / 1000))
   return (linksStore.status === 'expired') === isExpired
     && (!linksStore.tag || link.tags?.includes(linksStore.tag))
+    && matchesFolderFilter(link)
 }
 
 function updateLinkList(link: DashboardLink, type: LinkUpdateType) {
@@ -130,7 +163,54 @@ function updateLinkList(link: DashboardLink, type: LinkUpdateType) {
 }
 
 linksStore.onLinkUpdate(({ link, type }) => {
+  // Captured first: updateLinkList can switch sortBy to 'newest', and computing
+  // the key afterwards filed the old, differently sorted page under the new sort.
+  const key = cacheKey()
   updateLinkList(link, type)
+  // Keep the cache in step so navigating away and back does not briefly show
+  // the link as it was before this edit.
+  if (key === cacheKey())
+    writeDashboardCache(key, links.value.slice(0, limit))
+})
+
+linksStore.onLinksRefresh(() => {
+  // A bulk change such as a folder delete can touch links on pages this client
+  // never loaded, so every cached list page is suspect. The folder entry is left
+  // alone: the folders store has just refreshed and rewritten it.
+  clearDashboardCache('links:')
+  resetAndLoad()
+})
+
+/**
+ * Moves are patched in place rather than reloaded. Without multi-select the only
+ * way to move several links is to drag them one after another, and a reload
+ * between drags would reset the list to page one and drop the scroll position,
+ * pulling the next card out from under the cursor.
+ */
+linksStore.onLinksMoved(({ slugs, folderId }) => {
+  const moved = new Set(slugs)
+  const next: DashboardLink[] = []
+  let changed = false
+
+  for (const link of links.value) {
+    if (!moved.has(link.slug)) {
+      next.push(link)
+      continue
+    }
+    changed = true
+    const updated: DashboardLink = { ...link, folderId: folderId ?? undefined }
+    // A link moved out of the folder being browsed no longer belongs in the list.
+    if (matchesFolderFilter(updated))
+      next.push(updated)
+  }
+
+  if (!changed)
+    return
+
+  links.value = next
+  // Other cached views now disagree about where these links live.
+  clearDashboardCache('links:')
+  writeDashboardCache(cacheKey(), next.slice(0, limit))
 })
 </script>
 

@@ -4,6 +4,22 @@ import { useScroll } from '@vueuse/core'
 const { pageTitle } = useDashboardRoute()
 const route = useRoute()
 
+// The folder store backs the sidebar tree, the editor picker, the move dialog
+// and the card folder chip, so it is loaded here rather than by any one of them.
+// The folder endpoints sit behind the same migration gate as links.
+const migration = useLinkMigration()
+const foldersStore = useDashboardFoldersStore()
+const linksStore = useDashboardLinksStore()
+
+watch(migration.completed, (completed) => {
+  if (completed)
+    void foldersStore.fetchFolders()
+}, { immediate: true })
+
+// Folder counts shift whenever a link is created, edited or deleted. Debounced,
+// so a burst of edits reconciles once instead of issuing a request each time.
+linksStore.onLinkUpdate(() => foldersStore.refreshFoldersSoon())
+
 const scrollContainer = ref<HTMLElement | null>(null)
 const { y } = useScroll(scrollContainer)
 
@@ -30,6 +46,15 @@ useSeoMeta({
       {{ $t('layouts.links.skip_to_content') }}
     </a>
     <DashboardSidebarAppSidebar />
+    <!--
+      Mounted at layout level, not on the links page: the sidebar folder tree and
+      the link card both open these, and both render on every dashboard page.
+      Leaving them on one page made those controls dead elsewhere and left the
+      store flag set, so the next visit opened a dialog with no target.
+    -->
+    <DashboardFoldersFolderFormDialog />
+    <DashboardFoldersFolderDeleteDialog />
+    <DashboardFoldersMoveLinkDialog />
     <SidebarInset
       class="
         max-h-svh overflow-hidden
